@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Admin Panel</title>
+<style>
+body { font-family: Arial; background: #eef2f3; }
+.header { background: #ff6f61; color: white; padding: 15px; text-align: center; }
+table { width: 90%; margin: auto; margin-top: 20px; border-collapse: collapse; }
+th, td { padding: 10px; border: 1px solid #ccc; text-align: center; }
+th { background: #ff6f61; color: white; }
+a { color: red; }
+</style>
+</head>
+<body>
+<div class="header">
+<h2>Admin Panel</h2>
+</div>
+
+<table>
+<tr>
+<th>ID</th>
+<th>Username</th>
+<th>Text</th>
+<th>Result</th>
+<th>Action</th>
+</tr>
+
+{% for r in records %}
+<tr>
+<td>{{ r[0] }}</td>
+<td>{{ r[1] }}</td>
+<td>{{ r[2] }}</td>
+<td>{{ r[3] }}</td>
+<td><a href="/delete/{{ r[0] }}">Delete</a></td>
+</tr>
+{% endfor %}
+</table>
+
+<br><center><a href="/logout">Logout</a></center>
+</body>
+</html>
+"""
