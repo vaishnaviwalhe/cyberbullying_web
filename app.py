@@ -1,6 +1,9 @@
 from flask import Flask, render_template, request, redirect, session
 import sqlite3
 from model import predict
+import os
+if not os.path.exists("model.pkl"):
+    import model
 
 app = Flask(__name__)
 app.secret_key = "secret123"
