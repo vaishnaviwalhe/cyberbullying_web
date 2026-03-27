@@ -7,7 +7,6 @@ data=pd.read_csv(file_path)
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
 
-
 data = pd.read_csv("data.csv")
 
 X = data["text"]

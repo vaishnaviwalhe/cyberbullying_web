@@ -1,131 +1,109 @@
-from flask import Flask, render_template, request, redirect, session
-import sqlite3
-from model import predict
-import os
-if not os.path.exists("model.pkl"):
-    import model
+from flask import Flask, render_template, request, redirect, url_for
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+import pickle
 
 app = Flask(__name__)
-app.secret_key = "secret123"
+app.config['SECRET_KEY'] = 'secret123'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
 
-def connect():
-    conn = sqlite3.connect("database.db")
-    cur = conn.cursor()
+db = SQLAlchemy(app)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS users(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT,
-        password TEXT,
-        role TEXT
-    )
-    """)
+login_manager = LoginManager()
+login_manager.init_app(app)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS records(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT,
-        text TEXT,
-        result TEXT
-    )
-    """)
+# LOAD MODEL
+model = pickle.load(open("model.pkl", "rb"))
+vectorizer = pickle.load(open("vectorizer.pkl", "rb"))
 
-    conn.commit()
-    conn.close()
+# USER TABLE
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(100), unique=True)
+    password = db.Column(db.String(100))
 
-connect()
+# MESSAGE TABLE
+class Message(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    text = db.Column(db.String(500))
+    result = db.Column(db.String(50))
+    user_id = db.Column(db.Integer)
 
-@app.route('/', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
-        conn = sqlite3.connect("database.db")
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM users WHERE username=? AND password=?",
-                    (username, password))
-        user = cur.fetchone()
-        conn.close()
+# HOME
+@app.route('/')
+def home():
+    return redirect(url_for('login'))
 
-        if user:
-            session['user'] = username
-            session['role'] = user[3]
-
-            if user[3] == "admin":
-                return redirect('/admin')
-            else:
-                return redirect('/dashboard')
-        else:
-            return "Invalid Login ❌"
-
-    return render_template('login.html')
-
+# REGISTER
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        role = request.form['role']
-
-        conn = sqlite3.connect("database.db")
-        cur = conn.cursor()
-        cur.execute("INSERT INTO users(username,password,role) VALUES(?,?,?)",
-                    (username, password, role))
-        conn.commit()
-        conn.close()
-
-        return redirect('/')
-
+        user = User(username=request.form['username'], password=request.form['password'])
+        db.session.add(user)
+        db.session.commit()
+        return redirect('/login')
     return render_template('register.html')
 
-@app.route('/dashboard', methods=['GET', 'POST'])
-def dashboard():
-    if 'user' not in session:
-        return redirect('/')
-
-    result = None
-
+# LOGIN
+@app.route('/login', methods=['GET', 'POST'])
+def login():
     if request.method == 'POST':
-        text = request.form['text']
-        result = predict(text)
+        user = User.query.filter_by(username=request.form['username']).first()
+        if user and user.password == request.form['password']:
+            login_user(user)
+            return redirect('/dashboard')
+    return render_template('login.html')
 
-        conn = sqlite3.connect("database.db")
-        cur = conn.cursor()
-        cur.execute("INSERT INTO records(username,text,result) VALUES(?,?,?)",
-                    (session['user'], text, result))
-        conn.commit()
-        conn.close()
+# DASHBOARD
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    return render_template('dashboard.html', name=current_user.username)
 
-    return render_template('dashboard.html', result=result)
+# PREDICT
+@app.route('/predict', methods=['POST'])
+@login_required
+def predict():
+    text = request.form['text']
+    data = vectorizer.transform([text])
+    result = model.predict(data)[0]
 
-@app.route('/admin')
-def admin():
-    if 'role' not in session or session['role'] != 'admin':
-        return redirect('/')
+    msg = Message(text=text, result=result, user_id=current_user.id)
+    db.session.add(msg)
+    db.session.commit()
 
-    conn = sqlite3.connect("database.db")
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM records")
-    records = cur.fetchall()
-    conn.close()
+    return render_template('result.html', text=text, result=result)
 
-    return render_template('admin.html', records=records)
+# VIEW DATA
+@app.route('/view')
+@login_required
+def view():
+    data = Message.query.filter_by(user_id=current_user.id).all()
+    return render_template('view.html', data=data)
 
+# DELETE
 @app.route('/delete/<int:id>')
+@login_required
 def delete(id):
-    conn = sqlite3.connect("database.db")
-    cur = conn.cursor()
-    cur.execute("DELETE FROM records WHERE id=?", (id,))
-    conn.commit()
-    conn.close()
+    msg = Message.query.get(id)
+    db.session.delete(msg)
+    db.session.commit()
+    return redirect('/view')
 
-    return redirect('/admin')
-
+# LOGOUT
 @app.route('/logout')
+@login_required
 def logout():
-    session.clear()
-    return redirect('/')
+    logout_user()
+    return redirect('/login')
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0",port=10000)
+# CREATE DB
+with app.app_context():
+    db.create_all()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
